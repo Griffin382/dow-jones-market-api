@@ -60,3 +60,30 @@ def atr_stats():
         FROM candles_h1
     """)
     return rows[0]
+
+
+@app.get("/stats/open-both-sides")
+def open_both_sides(multiplier: float = Query(0.25, ge=0, le=3)):
+    # For each H1 candle: up = how far price went above the open,
+    # down = how far it went below the open.
+    # LAG(atr) gives the ATR of the PREVIOUS candle, which was already known
+    # when this candle opened (so we do not peek into the future).
+    rows = query("""
+        SELECT COUNT(*) AS candles,
+               SUM(CASE WHEN up > ? * atr_prev AND down > ? * atr_prev
+                        THEN 1 ELSE 0 END) AS both_sides
+        FROM (
+            SELECT high - open AS up,
+                   open - low AS down,
+                   LAG(atr) OVER (ORDER BY time) AS atr_prev
+            FROM candles_h1
+        )
+        WHERE atr_prev IS NOT NULL
+    """, (multiplier, multiplier))
+    r = rows[0]
+    return {
+        "multiplier": multiplier,
+        "candles": r["candles"],
+        "both_sides": r["both_sides"],
+        "percent": round(100 * r["both_sides"] / r["candles"], 1),
+    }
